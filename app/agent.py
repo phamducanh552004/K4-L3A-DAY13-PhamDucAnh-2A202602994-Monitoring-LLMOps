@@ -38,6 +38,9 @@ class LabAgent:
         correlation_id: str,
     ) -> AgentResult:
         langfuse_client = get_langfuse_client()
+        instrument_observations = tracing_enabled() and callable(
+            getattr(langfuse_client, "start_as_current_observation", None)
+        )
         with propagate_attributes(
             user_id=hash_user_id(user_id),
             session_id=session_id,
@@ -51,7 +54,19 @@ class LabAgent:
             },
         ):
             started = time.perf_counter()
-            docs = retrieve(message)
+            if instrument_observations:
+                with langfuse_client.start_as_current_observation(
+                    name="retrieval",
+                    as_type="retriever",
+                    input={"query": summarize_text(message)},
+                ) as retrieval_observation:
+                    docs = retrieve(message)
+                    retrieval_observation.update(
+                        output={"documents": [summarize_text(doc) for doc in docs]},
+                        metadata={"doc_count": len(docs)},
+                    )
+            else:
+                docs = retrieve(message)
             prompt = resolve_prompt(
                 langfuse_client,
                 feature=feature,
@@ -71,13 +86,35 @@ class LabAgent:
                 },
                 version=prompt.version,
             )
-            # TODO (CP2): instrument retrieve() and FakeLLM.generate() as child
-            # observations. The nested generation must receive prompt, usage and cost.
-            with propagate_attributes(prompt=prompt.managed_prompt):
-                response = self.llm.generate(prompt.text)
+            if instrument_observations:
+                with langfuse_client.start_as_current_observation(
+                    name="generation",
+                    as_type="generation",
+                    input={"prompt": summarize_text(prompt.text, max_len=2_000)},
+                    model=self.model,
+                    prompt=prompt.managed_prompt,
+                    version=prompt.version,
+                ) as generation_observation:
+                    response = self.llm.generate(prompt.text)
+                    cost_usd = self._estimate_cost(
+                        response.usage.input_tokens, response.usage.output_tokens
+                    )
+                    generation_observation.update(
+                        output={"answer": summarize_text(response.text, max_len=1_000)},
+                        usage_details={
+                            "input": response.usage.input_tokens,
+                            "output": response.usage.output_tokens,
+                        },
+                        cost_details={"total": cost_usd},
+                    )
+            else:
+                with propagate_attributes(prompt=prompt.managed_prompt):
+                    response = self.llm.generate(prompt.text)
+                cost_usd = self._estimate_cost(
+                    response.usage.input_tokens, response.usage.output_tokens
+                )
             quality_score = self._heuristic_quality(message, response.text, docs)
             latency_ms = int((time.perf_counter() - started) * 1000)
-            cost_usd = self._estimate_cost(response.usage.input_tokens, response.usage.output_tokens)
 
         metrics.record_request(
             latency_ms=latency_ms,
