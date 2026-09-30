@@ -9,7 +9,7 @@
 - **Lớp:** K4-L3A
 - **Repository URL:** https://github.com/phamducanh552004/K4-L3A-DAY13-PhamDucAnh-2A202602994-Monitoring-LLMOps
 - **Commit SHA cuối:** Cập nhật sau khi commit và push phiên bản nộp.
-- **Challenge ID:** Chờ Lab Coach release file riêng tại `config/challenge.json`.
+- **Challenge ID:** `day13-k4-l3a-monitoring-llmops-v1`.
 - **Tên project Langfuse cá nhân:** `day13-k4-l3a-2A202602994`
 
 ## 2. Evidence index
@@ -37,12 +37,12 @@
 
 | Nội dung | Baseline | Kết quả cuối | Nhận xét |
 |---|---|---|---|
-| `validate_logs.py` | Starter có TODO | 100/100; thiếu field/enrichment/PII leak đều bằng 0 | Chạy sau workload 12 request. |
+| `validate_logs.py` | Starter có TODO | 100/100; thiếu field/enrichment/PII leak đều bằng 0 | Chạy sau workload và challenge chính thức. |
 | `validate_dashboard.py` | Contract starter | Hợp lệ 6/6 panel | Dashboard contract giữ time range 60 phút, refresh 30 giây. |
 | `pytest` | Chưa lưu baseline | 23 passed | Có 1 cảnh báo deprecation từ dependency `anyio`, không có test fail. |
-| Số traces hợp lệ | 0 | 12 root traces | 10 workload baseline, 1 v2 và 1 sau rollback v1. |
+| Số traces hợp lệ | 0 | 17 root traces | 10 workload baseline, 1 v2, 1 sau rollback v1 và 5 request challenge. |
 | Số PII leak | Chưa đo baseline | 0 | Validator quét email, điện thoại, CCCD và thẻ. |
-| Latency P95 / TTFT P95 | Không dùng để kết luận | 1418 ms / 50 ms | Giá trị dashboard tại thời điểm chạy workload. |
+| Latency P95 / TTFT P95 | Không dùng để kết luận | 1418 ms / 50 ms | Giá trị dashboard trước challenge; challenge có P95 3655 ms, vượt ngưỡng 2000 ms. |
 | Retrieval success rate | Không dùng để kết luận | 100% | Lấy từ event `response_sent.tool_success`. |
 
 ## 4. Logging và PII
@@ -72,14 +72,14 @@
 
 ## 7. Điều tra challenge
 
-- **Challenge ID:** Chưa có — Lab Coach chưa release `config/challenge.json`.
-- **Khoảng thời gian điều tra:** Chưa chạy challenge chính thức.
-- **Triệu chứng từ metrics:** Chưa kết luận khi không có challenge được cấp.
-- **Log line và correlation ID liên quan:** Chờ challenge.
-- **Trace ID và span gây ảnh hưởng:** Chờ challenge.
-- **Root cause:** Chờ evidence Metrics → Logs → Traces của challenge.
-- **Fix action:** Chờ xác định root cause.
-- **Preventive measure:** Chờ xác định root cause.
+- **Challenge ID:** `day13-k4-l3a-monitoring-llmops-v1`; incident `rag_slow`; feature bị ảnh hưởng `monitoring`.
+- **Khoảng thời gian điều tra:** 2026-09-30 03:13–03:14 UTC, sau khi bật incident và chạy 5 query chính thức với concurrency 5.
+- **Triệu chứng từ metrics:** Client đo 5 request khoảng 14.9 giây; các log `response_sent` của challenge có latency 2651–3655 ms. P95 theo nearest-rank là 3655 ms, vượt `latency_threshold_ms=2000`.
+- **Log line và correlation ID liên quan:** `req-5ad5cccb`, session `k4-l3a-challenge-s03`, `response_sent` lúc 03:13:58 UTC, latency 3655 ms.
+- **Trace ID và span gây ảnh hưởng:** Trace `5f8bfe21685c6646ea7d346a89bb778b`, root `lab-agent-run`, child span `retrieval`.
+- **Root cause:** `app/mock_rag.py` bật nhánh `STATE["rag_slow"]` và gọi blocking `time.sleep(2.5)`. Vì endpoint xử lý đồng bộ, các request đồng thời còn xếp hàng, làm độ trễ phía client tăng lên gần 15 giây.
+- **Fix action:** Tắt incident qua endpoint `/incidents/rag_slow/disable` và xác nhận trạng thái `rag_slow: false` từ `/health`.
+- **Preventive measure:** Với backend RAG thật, dùng I/O bất đồng bộ hoặc offload tác vụ blocking, thêm timeout; giữ alert P95 và điều tra theo correlation ID → trace `retrieval`.
 
 ## 8. Giải thích và tự đánh giá
 
@@ -89,7 +89,7 @@
 - **Cách hiểu luồng Metrics → Logs → Traces:** Metrics phát hiện triệu chứng; log lọc request theo correlation ID; trace cùng ID phân rã thời gian root/retrieval/generation để tìm bước gây ảnh hưởng.
 - **Vai trò của prompt version, token/cost, SLO hoặc rollback trong vận hành LLM:** Prompt label cho phép thử candidate rồi quay về baseline không cần redeploy; token/cost và SLO giúp cân bằng chất lượng với độ tin cậy và chi phí.
 - **Điều quan trọng nhất đã học:** Validator chỉ kiểm tra contract; evidence runtime mới chứng minh hệ thống quan sát hoạt động với dữ liệu thật.
-- **Hạn chế hoặc phần chưa hoàn thành, nếu có:** CP3 và evidence incident chờ file challenge riêng do Lab Coach cấp; không tự tạo hoặc thay thế file này.
+- **Hạn chế hoặc phần chưa hoàn thành, nếu có:** Cần chụp evidence runtime cho challenge và đặt đúng các đường dẫn trong mục 2; không đưa `config/challenge.json` vào Git.
 
 ## 9. Checklist trước khi nộp
 
